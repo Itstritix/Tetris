@@ -1,20 +1,20 @@
 ﻿using System;
+using System.Diagnostics;     // Pour Stopwatch
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading; // Pour DispatcherTimer
 using Tetris.Blocks;
 
 namespace Tetris
 {
-    /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// </summary>
     public partial class MainWindow : Window
     {
-        private readonly ImageSource[] tileImages = new ImageSource[]
+        // Images tuiles
+        private readonly ImageSource[] tileImages =
         {
             new BitmapImage(new Uri("Assets/TileEmpty.png", UriKind.Relative)),
             new BitmapImage(new Uri("Assets/TileCyan.png", UriKind.Relative)),
@@ -26,7 +26,8 @@ namespace Tetris
             new BitmapImage(new Uri("Assets/TileRed.png", UriKind.Relative))
         };
 
-        private readonly ImageSource[] blockImages = new ImageSource[]
+        // Images blocs
+        private readonly ImageSource[] blockImages =
         {
             new BitmapImage(new Uri("Assets/Block-Empty.png", UriKind.Relative)),
             new BitmapImage(new Uri("Assets/Block-I.png", UriKind.Relative)),
@@ -38,22 +39,39 @@ namespace Tetris
             new BitmapImage(new Uri("Assets/Block-Z.png", UriKind.Relative))
         };
 
+        // Matrice d'images pour le Canvas
         private readonly Image[,] imageControls;
+
+        // Paramètres de vitesse du jeu
         private readonly int maxDelay = 1000;
         private readonly int minDelay = 75;
         private readonly int delayDecrease = 25;
 
+        // État du jeu
         private GameState gameState = new GameState();
+
+        // ===============================
+        // =========== TIMER =============
+        // ===============================
+        private DispatcherTimer gameClockTimer; // Pour rafraîchir l'affichage du temps
+        private Stopwatch stopwatch;            // Chronomètre pour mesurer le temps écoulé
 
         public MainWindow()
         {
             InitializeComponent();
+
+            // Initialisation du canvas
             imageControls = SetupGameCanvas(gameState.GameGrid);
+
+            // Initialisation du timer
+            gameClockTimer = new DispatcherTimer();
+            gameClockTimer.Interval = TimeSpan.FromSeconds(1);
+            gameClockTimer.Tick += GameClockTimer_Tick;
         }
 
         private Image[,] SetupGameCanvas(GameGrid grid)
         {
-            Image[,] imageControls = new Image[grid.Rows, grid.Columns];
+            Image[,] controls = new Image[grid.Rows, grid.Columns];
             int cellSize = 25;
 
             for (int r = 0; r < grid.Rows; r++)
@@ -66,14 +84,100 @@ namespace Tetris
                         Height = cellSize
                     };
 
+                    // Position
                     Canvas.SetTop(imageControl, (r - 2) * cellSize + 10);
                     Canvas.SetLeft(imageControl, c * cellSize);
+
                     GameCanvas.Children.Add(imageControl);
-                    imageControls[r, c] = imageControl;
+                    controls[r, c] = imageControl;
                 }
             }
 
-            return imageControls;
+            return controls;
+        }
+
+        // ===============================
+        // ========== ÉVÉNEMENTS =========
+        // ===============================
+
+        private async void Play_Click(object sender, RoutedEventArgs e)
+        {
+            // On cache le menu de démarrage
+            StartMenu.Visibility = Visibility.Hidden;
+
+            // Réinitialise l'état du jeu
+            gameState = new GameState();
+
+            // (Ré)initialiser le chrono
+            stopwatch = new Stopwatch();
+            stopwatch.Start();
+
+            // Lance le timer qui rafraîchit le TimerText
+            gameClockTimer.Start();
+
+            // Lance la boucle de jeu
+            await GameLoop();
+        }
+
+        private void Quit_Click(object sender, RoutedEventArgs e)
+        {
+            Application.Current.Shutdown();
+        }
+
+        private async void PlayAgain_Click(object sender, RoutedEventArgs e)
+        {
+            // Masque le menu Game Over
+            GameOverMenu.Visibility = Visibility.Hidden;
+
+            // Réinitialiser l'état du jeu
+            gameState = new GameState();
+
+            // Remettre le chrono à zéro
+            stopwatch = new Stopwatch();
+            stopwatch.Start();
+            gameClockTimer.Start();
+
+            // Relancer la boucle
+            await GameLoop();
+        }
+
+        // ===============================
+        // ========== BOUCLE JEU =========
+        // ===============================
+        private async Task GameLoop()
+        {
+            Draw(gameState);
+
+            while (!gameState.GameOver)
+            {
+                int delay = Math.Max(minDelay, maxDelay - (gameState.Score * delayDecrease));
+                await Task.Delay(delay);
+
+                gameState.MoveBlockDown();
+                Draw(gameState);
+            }
+
+            // Quand la partie est terminée
+            GameOverMenu.Visibility = Visibility.Visible;
+            FinalScoreText.Text = $"Score: {gameState.Score}";
+
+            // Arrêter le chrono
+            stopwatch.Stop();
+            gameClockTimer.Stop();
+        }
+
+        // ===============================
+        // == DESSIN & MISE À JOUR UI ===
+        // ===============================
+        private void Draw(GameState state)
+        {
+            DrawGrid(state.GameGrid);
+            DrawGhostBlock(state.CurrentBlock);
+            DrawBlock(state.CurrentBlock);
+            DrawNextBlock(state.BlockQueue);
+            DrawHeldBlock(state.HeldBlock);
+
+            ScoreText.Text = $"Score: {state.Score}";
         }
 
         private void DrawGrid(GameGrid grid)
@@ -119,7 +223,6 @@ namespace Tetris
         private void DrawGhostBlock(Block block)
         {
             int dropDistance = gameState.BlockDropDistance();
-
             foreach (Position p in block.TilePositions())
             {
                 imageControls[p.Row + dropDistance, p.Column].Opacity = 0.25;
@@ -127,32 +230,21 @@ namespace Tetris
             }
         }
 
-        private void Draw(GameState gameState)
+        // ===============================
+        // ====== MISE À JOUR TIMER ======
+        // ===============================
+        private void GameClockTimer_Tick(object sender, EventArgs e)
         {
-            DrawGrid(gameState.GameGrid);
-            DrawGhostBlock(gameState.CurrentBlock);
-            DrawBlock(gameState.CurrentBlock);
-            DrawNextBlock(gameState.BlockQueue);
-            DrawHeldBlock(gameState.HeldBlock);
-            ScoreText.Text = $"Score: {gameState.Score}";
-        }
-
-        private async Task GameLoop()
-        {
-            Draw(gameState);
-
-            while (!gameState.GameOver)
+            if (stopwatch != null && stopwatch.IsRunning)
             {
-                int delay = Math.Max(minDelay, maxDelay - (gameState.Score * delayDecrease));
-                await Task.Delay(delay);
-                gameState.MoveBlockDown();
-                Draw(gameState);
+                // Format "mm:ss"
+                TimerText.Text = stopwatch.Elapsed.ToString(@"mm\:ss");
             }
-
-            GameOverMenu.Visibility = Visibility.Visible;
-            FinalScoreText.Text = $"Score: {gameState.Score}";
         }
 
+        // ===============================
+        // ====== GESTION DU CLAVIER =====
+        // ===============================
         private void Window_KeyDown(object sender, KeyEventArgs e)
         {
             if (gameState.GameOver)
@@ -188,18 +280,6 @@ namespace Tetris
             }
 
             Draw(gameState);
-        }
-
-        private async void GameCanvas_Loaded(object sender, RoutedEventArgs e)
-        {
-            await GameLoop();
-        }
-
-        private async void PlayAgain_Click(object sender, RoutedEventArgs e)
-        {
-            gameState = new GameState();
-            GameOverMenu.Visibility = Visibility.Hidden;
-            await GameLoop();
         }
     }
 }
